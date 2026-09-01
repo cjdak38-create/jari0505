@@ -25,7 +25,7 @@
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .seat-card:hover:not(.seat-taken) {
-      transform: translateY(-4px) scale(1.03);
+      transform: translateY(-3px) scale(1.02);
       box-shadow: 0 8px 16px -2px rgba(99, 102, 241, 0.25);
     }
     .seat-taken {
@@ -59,7 +59,7 @@
         <i class="fa-solid fa-chair text-3xl"></i>
       </div>
       <h2 class="text-2xl font-bold text-slate-900">실시간 자리 선택</h2>
-      <p class="text-xs text-slate-500 mt-1 mb-6">이름을 적고 들어와서 원하는 자리를 누르세요!</p>
+      <p class="text-xs text-slate-500 mt-1 mb-6">이름을 입력하면 실시간으로 교실에 연결됩니다!</p>
 
       <div class="space-y-4">
         <div class="text-left">
@@ -75,6 +75,18 @@
     </div>
   </div>
 
+  <!-- 커스텀 다이얼로그 (alert/confirm 대체) -->
+  <div id="customDialog" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center transform transition-all">
+      <div id="customDialogIcon" class="mb-4 text-3xl"></div>
+      <p id="customDialogMessage" class="text-slate-800 font-medium mb-6 whitespace-pre-wrap"></p>
+      <div class="flex gap-3 justify-center">
+        <button id="customDialogCancel" class="hidden px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition">취소</button>
+        <button id="customDialogConfirm" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition">확인</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 상단 헤더 -->
   <header class="bg-white/80 backdrop-blur border-b border-slate-200 sticky top-0 z-30 shadow-sm">
     <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -83,7 +95,13 @@
           <i class="fa-solid fa-school text-xl"></i>
         </div>
         <div>
-          <h1 class="text-lg font-bold text-slate-900 leading-tight">실시간 자율 자리 선택 교실</h1>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold text-slate-900 leading-tight">실시간 자율 자리 선택 교실</h1>
+            <!-- 실시간 상태 태그 -->
+            <span id="syncIndicator" class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+              <span class="w-2 h-2 rounded-full bg-slate-400"></span> 연결 중...
+            </span>
+          </div>
           <p id="userInfoText" class="text-xs text-slate-500">접속자: 이름을 입력해 주세요</p>
         </div>
       </div>
@@ -101,10 +119,10 @@
           <span>선생님 모드: <span id="teacherModeStatus" class="text-slate-500">OFF</span></span>
         </button>
 
-        <!-- 중복 정리 버튼 (선생님 모드 시 표시 또는 항상 가능) -->
+        <!-- 중복 정리 버튼 -->
         <button onclick="cleanDuplicateSeats()" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition flex items-center gap-1">
           <i class="fa-solid fa-broom"></i>
-          <span class="hidden sm:inline">중복 이름 정돈</span>
+          <span class="hidden sm:inline">중복 정돈</span>
         </button>
 
         <!-- 전체 초기화 버튼 -->
@@ -127,9 +145,9 @@
     <div id="statusBanner" class="bg-indigo-50 border border-indigo-200 p-4 rounded-2xl mb-6 flex items-center justify-between gap-4 shadow-sm transition">
       <div class="flex items-center gap-3 text-sm text-indigo-900">
         <span id="statusIcon" class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs shadow-sm">
-          <i class="fa-solid fa-hand-pointer"></i>
+          <i class="fa-solid fa-satellite-dish animate-pulse"></i>
         </span>
-        <span id="statusMessage">원하는 책상을 클릭하면 자리가 즉시 등록됩니다!</span>
+        <span id="statusMessage">다른 사람이 자리를 택하면 이 화면에도 실시간으로 반영됩니다!</span>
       </div>
     </div>
 
@@ -150,7 +168,7 @@
             칠 판 (앞 쪽)
           </p>
           <p class="text-xs text-emerald-300/80 mt-1">
-            원하는 자리를 선택해 주세요
+            원하시는 자리를 선택해 주세요
           </p>
         </div>
 
@@ -191,17 +209,58 @@
     const db = getFirestore(app);
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'classroom-seat-app';
 
-    // 사용자 상태
+    // 전역 상태
     window.currentUser = null;
     window.userUid = localStorage.getItem('temp_student_uid') || `user_${Math.random().toString(36).substr(2, 9)}`;
     localStorage.setItem('temp_student_uid', window.userUid);
 
-    window.studentName = '';
+    window.studentName = localStorage.getItem('temp_student_name') || '';
     window.seatData = {};
     window.isTeacherMode = false;
     const TOTAL_SEATS = 29;
 
-    // 인증
+    // 커스텀 다이얼로그 함수 (alert, confirm 대체)
+    window.showDialog = function(message, isConfirm = false, iconClass = 'fa-solid fa-circle-info text-indigo-500') {
+      return new Promise((resolve) => {
+        const dialog = document.getElementById('customDialog');
+        const msgEl = document.getElementById('customDialogMessage');
+        const iconEl = document.getElementById('customDialogIcon');
+        const cancelBtn = document.getElementById('customDialogCancel');
+        const confirmBtn = document.getElementById('customDialogConfirm');
+
+        msgEl.innerText = message;
+        iconEl.className = `mb-4 text-3xl ${iconClass}`;
+        
+        dialog.classList.remove('hidden');
+        dialog.classList.add('flex');
+
+        if (isConfirm) {
+          cancelBtn.classList.remove('hidden');
+        } else {
+          cancelBtn.classList.add('hidden');
+        }
+
+        const close = (result) => {
+          dialog.classList.add('hidden');
+          dialog.classList.remove('flex');
+          confirmBtn.onclick = null;
+          cancelBtn.onclick = null;
+          resolve(result);
+        };
+
+        confirmBtn.onclick = () => close(true);
+        cancelBtn.onclick = () => close(false);
+      });
+    };
+
+    // 저장된 이름이 있으면 자동 입력창 채우기
+    if (window.studentName) {
+      document.getElementById('studentNameInput').value = window.studentName;
+      document.getElementById('userInfoText').innerText = `접속자: ${window.studentName}`;
+      document.getElementById('joinModal').classList.add('hidden');
+    }
+
+    // 1. Firebase 인증 초기화
     async function initAuth() {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -219,26 +278,90 @@
         window.currentUser = user;
         window.userUid = user.uid;
       }
-      listenToSeats();
+      // 인증 완료 직후 실시간 리스너 연결
+      startRealtimeListener();
     });
 
     initAuth();
 
+    // 2. 실시간 동기화 리스너 (모든 사람의 화면을 즉시 연결)
+    let unsubscribe = null;
+    function startRealtimeListener() {
+      if (unsubscribe) unsubscribe();
+
+      // 저장 경로: public 공유 경로 사용
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'classroom', 'current_seats');
+
+      const indicator = document.getElementById('syncIndicator');
+
+      unsubscribe = onSnapshot(roomRef, async (snapshot) => {
+        // 실시간 연결 성공 표시
+        if (indicator) {
+          indicator.className = "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200";
+          indicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> 🟢 실시간 연결됨`;
+        }
+
+        if (snapshot.exists()) {
+          const rawSeats = snapshot.data().seats || {};
+          const { cleanedSeats, hasDuplicates } = filterDuplicates(rawSeats);
+
+          window.seatData = cleanedSeats;
+
+          // 만약 DB에 기존 중복 데이터가 남아있다면 즉시 자동 정리하여 DB에 새로 저장
+          if (hasDuplicates) {
+            await syncToFirestore();
+          }
+        } else {
+          window.seatData = {};
+        }
+        renderClassroom();
+      }, (err) => {
+        console.error("Firestore Listen Error:", err);
+        if (indicator) {
+          indicator.className = "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600";
+          indicator.innerHTML = `🔴 연결 오류`;
+        }
+      });
+    }
+
+    // ★ 중복 이름 자동 정돈 함수 (이름 기준 가장 최근 1개만 남기기)
+    function filterDuplicates(rawSeats) {
+      const cleanedSeats = {};
+      const nameLatestSeat = {};
+
+      Object.keys(rawSeats).forEach(seatKey => {
+        const item = rawSeats[seatKey];
+        if (item && item.name) {
+          const existing = nameLatestSeat[item.name];
+          const itemTime = item.time || 0;
+          if (!existing || itemTime > existing.time) {
+            nameLatestSeat[item.name] = { seatKey, item, time: itemTime };
+          }
+        }
+      });
+
+      Object.values(nameLatestSeat).forEach(({ seatKey, item }) => {
+        cleanedSeats[seatKey] = item;
+      });
+
+      return { cleanedSeats, hasDuplicates: Object.keys(rawSeats).length !== Object.keys(cleanedSeats).length };
+    }
+
     // 교실 입장 함수
-    window.enterClassroom = function() {
+    window.enterClassroom = async function() {
       const nameInput = document.getElementById('studentNameInput');
       const name = nameInput.value.trim();
 
       if (!name) {
-        alert('이름이나 번호를 입력해 주세요.');
+        await window.showDialog('이름이나 번호를 입력해 주세요.', false, 'fa-solid fa-circle-exclamation text-amber-500');
         return;
       }
 
       window.studentName = name;
+      localStorage.setItem('temp_student_name', name);
       document.getElementById('joinModal').classList.add('hidden');
       document.getElementById('userInfoText').innerText = `접속자: ${window.studentName}`;
       renderClassroom();
-      listenToSeats();
     };
 
     window.changeName = function() {
@@ -254,7 +377,7 @@
       const message = document.getElementById('statusMessage');
 
       if (window.isTeacherMode) {
-        statusEl.innerText = 'ON (개별 자리 삭제 가능)';
+        statusEl.innerText = 'ON';
         statusEl.className = 'text-amber-600 font-bold';
         btnEl.className = 'px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm';
         banner.className = 'bg-amber-50 border border-amber-300 p-4 rounded-2xl mb-6 flex items-center justify-between gap-4 shadow-sm transition';
@@ -264,90 +387,40 @@
         statusEl.className = 'text-slate-500';
         btnEl.className = 'px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5';
         banner.className = 'bg-indigo-50 border border-indigo-200 p-4 rounded-2xl mb-6 flex items-center justify-between gap-4 shadow-sm transition';
-        message.innerText = '원하는 책상을 클릭하면 자리가 즉시 등록됩니다!';
+        message.innerText = '다른 사람이 자리를 택하면 이 화면에도 실시간으로 반영됩니다!';
       }
       renderClassroom();
     };
 
-    // ★ 실시간 중복 데이터 자동으로 걸러주는 로직
-    function filterDuplicates(rawSeats) {
-      const cleanedSeats = {};
-      const nameLatestSeat = {}; // 이름별로 가장 최근 선택된 자리 정보 저장
-
-      // 모든 좌석을 순회하며 이름별 최신 선택 항목만 찾음
-      Object.keys(rawSeats).forEach(seatKey => {
-        const item = rawSeats[seatKey];
-        if (item && item.name) {
-          const existing = nameLatestSeat[item.name];
-          const itemTime = item.time || 0;
-          if (!existing || itemTime > existing.time) {
-            nameLatestSeat[item.name] = { seatKey, item, time: itemTime };
-          }
-        }
-      });
-
-      // 최신 선택된 자리만 신규 객체에 보관
-      Object.values(nameLatestSeat).forEach(({ seatKey, item }) => {
-        cleanedSeats[seatKey] = item;
-      });
-
-      return { cleanedSeats, hasDuplicates: Object.keys(rawSeats).length !== Object.keys(cleanedSeats).length };
-    }
-
-    // 실시간 동기화
-    let unsubscribe = null;
-    function listenToSeats() {
-      if (unsubscribe) unsubscribe();
-
-      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'main_classroom', 'seats');
-
-      unsubscribe = onSnapshot(roomRef, async (snapshot) => {
-        if (snapshot.exists()) {
-          const rawSeats = snapshot.data().seats || {};
-          const { cleanedSeats, hasDuplicates } = filterDuplicates(rawSeats);
-
-          window.seatData = cleanedSeats;
-
-          // 만약 기존 데이터에 중복(박수민 3개 등)이 있었다면 DB도 자동 보정 업데이트
-          if (hasDuplicates) {
-            await syncToFirestore();
-          }
-        } else {
-          window.seatData = {};
-        }
-        renderClassroom();
-      }, (err) => {
-        console.error("Firestore Listen Error:", err);
-      });
-    }
-
-    // [중복 이름 자동 정돈] 기능
+    // 수동 중복 정리 버튼
     window.cleanDuplicateSeats = async function() {
       const { cleanedSeats, hasDuplicates } = filterDuplicates(window.seatData);
       window.seatData = cleanedSeats;
       renderClassroom();
       await syncToFirestore();
       if (hasDuplicates) {
-        alert('중복 선택된 이름들을 정리하여 1인 1자리로 맞추었습니다!');
+        await window.showDialog('중복 선택된 이름들을 정리하여 1인 1자리로 맞추었습니다!', false, 'fa-solid fa-broom text-amber-500');
       } else {
-        alert('중복된 자리가 없습니다. 깔끔합니다!');
+        await window.showDialog('중복된 자리가 없습니다.', false, 'fa-solid fa-check text-green-500');
       }
     };
 
-    // 자리 선택 / 취소 / 삭제 처리
+    // 자리 선택 / 취소 / 이동 처리
     window.handleSeatClick = async function(seatIndex) {
       const seatKey = `seat_${seatIndex}`;
       const occupant = window.seatData[seatKey];
       const myName = window.studentName;
       const myUid = window.userUid;
 
-      // 0. 선생님 모드일 경우: 해당 자리가 누구의 자리이든 즉시 삭제 가능
+      // 선생님 모드
       if (window.isTeacherMode) {
         if (!occupant) {
-          alert('비어 있는 자리입니다.');
+          await window.showDialog('비어 있는 자리입니다.', false, 'fa-solid fa-circle-info text-indigo-500');
           return;
         }
-        if (confirm(`'${occupant.name}' 학생의 자리를 강제로 비우시겠습니까?`)) {
+        
+        const isConfirm = await window.showDialog(`'${occupant.name}' 학생의 자리를 강제로 비우시겠습니까?`, true, 'fa-solid fa-triangle-exclamation text-rose-500');
+        if (isConfirm) {
           delete window.seatData[seatKey];
           renderClassroom();
           await syncToFirestore();
@@ -355,24 +428,25 @@
         return;
       }
 
-      // 학생 일반 모드
+      // 학생 미입력 상태
       if (!myName) {
-        alert('먼저 이름을 입력해 주세요.');
+        await window.showDialog('먼저 이름을 입력해 주세요.', false, 'fa-solid fa-user text-indigo-500');
         document.getElementById('joinModal').classList.remove('hidden');
         return;
       }
 
       const isMineOccupant = occupant && (occupant.name === myName || occupant.uid === myUid);
 
-      // 1. 이미 다른 학생이 점유한 자리인 경우
+      // 1. 타인이 이미 자리를 선택함
       if (occupant && !isMineOccupant) {
-        alert(`[${occupant.name}] 님이 이미 선택한 자리입니다.`);
+        await window.showDialog(`[${occupant.name}] 님이 이미 선택한 자리입니다.`, false, 'fa-solid fa-lock text-slate-500');
         return;
       }
 
-      // 2. 내가 선택한 자리를 다시 눌러 취소하는 경우
+      // 2. 내 자리를 한 번 더 눌러 선택 취소
       if (isMineOccupant) {
-        if (confirm('이 자리 선택을 취소하시겠습니까?')) {
+        const isConfirm = await window.showDialog('이 자리 선택을 취소하시겠습니까?', true, 'fa-solid fa-arrow-rotate-left text-slate-500');
+        if (isConfirm) {
           delete window.seatData[seatKey];
           renderClassroom();
           await syncToFirestore();
@@ -380,8 +454,7 @@
         return;
       }
 
-      // 3. 빈 자리를 선택하는 경우
-      // ★ 나와 동일한 이름 또는 UID가 차지하고 있는 이전 모든 자리를 완벽히 삭제
+      // 3. 빈 자리 선택 (기존 내 동일 이름 자리는 무조건 모두 삭제!)
       Object.keys(window.seatData).forEach(key => {
         const item = window.seatData[key];
         if (item && (item.name === myName || item.uid === myUid)) {
@@ -389,41 +462,40 @@
         }
       });
 
-      // 새로운 자리에 등록
+      // 새 자리에 할당
       window.seatData[seatKey] = {
         name: myName,
         uid: myUid,
         time: Date.now()
       };
 
-      // 화면 즉시 그리기
+      // 화면 업데이트 및 Firestore 실시간 동기화
       renderClassroom();
-
-      // 서버 동기화
       await syncToFirestore();
     };
 
-    // Firestore에 전체 seatData 안전하게 저장
+    // Firestore 공유 DB에 저장
     async function syncToFirestore() {
       try {
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'main_classroom', 'seats');
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'classroom', 'current_seats');
         await setDoc(roomRef, { seats: window.seatData });
       } catch (err) {
         console.error("Firestore Sync Error:", err);
       }
     }
 
-    // 전체 자리 초기화
+    // 전체 초기화
     window.resetAllSeats = async function() {
-      if (confirm('모든 학생의 자리 선택을 초기화하시겠습니까?')) {
+      const isConfirm = await window.showDialog('모든 학생의 자리 선택을 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.', true, 'fa-solid fa-triangle-exclamation text-rose-600');
+      if (isConfirm) {
         window.seatData = {};
         renderClassroom();
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'main_classroom', 'seats');
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'classroom', 'current_seats');
         await setDoc(roomRef, { seats: {} });
       }
     };
 
-    // 화면 그리기 함수
+    // 화면 렌더링 함수
     function renderClassroom() {
       const container = document.getElementById('seatLayout');
       if (!container) return;
@@ -491,7 +563,6 @@
       if (countEl) countEl.innerText = count;
     }
 
-    // 초기 화면 렌더링
     renderClassroom();
   </script>
 </body>
